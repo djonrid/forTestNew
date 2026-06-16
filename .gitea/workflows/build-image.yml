@@ -19,6 +19,7 @@ jobs:
       REF_NAME: ${{ gitea.ref_name }}
       GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
       VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
+      VERSIONIZE_TIMEZONE: Asia/Krasnoyarsk
 
     steps:
       - name: Disable SSL verify
@@ -101,6 +102,14 @@ jobs:
 
           dotnet tool update --global Versionize || dotnet tool install --global Versionize
           export PATH="$PATH:$HOME/.dotnet/tools"
+
+          export TZ="$VERSIONIZE_TIMEZONE"
+          VERSIONIZE_TZ_OFFSET=$(date +%z)
+          echo "Versionize timezone: $TZ ($VERSIONIZE_TZ_OFFSET)"
+          if [ "$VERSIONIZE_TZ_OFFSET" != "+0700" ]; then
+            echo "Versionize timezone must resolve to UTC+7 before creating the release commit." >&2
+            exit 1
+          fi
 
           versionize --proj-name "$VERSIONIZE_PROJECT_NAME" --skip-dirty
 
