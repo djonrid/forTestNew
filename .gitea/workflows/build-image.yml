@@ -1,0 +1,239 @@
+name: Build RTServerCore image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  versionize:
+    runs-on: dotnet10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_sha: ${{ steps.version.outputs.release_sha }}
+    env:
+      SERVER_URL: ${{ gitea.server_url }}
+      REPO: ${{ gitea.repository }}
+      SHA: ${{ gitea.sha }}
+      REF_NAME: ${{ gitea.ref_name }}
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+      VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
+      TZ: Asia/Novosibirsk
+
+    steps:
+      - name: Disable SSL verify
+        shell: sh
+        run: |
+          set -e
+          git config --global http.sslVerify false
+          git config --global log.date iso-local
+          echo "Git timezone: $TZ ($(date +%z))"
+
+      - name: Checkout repository
+        shell: sh
+        run: |
+          set -e
+          SERVER_URL="${SERVER_URL:-${GITHUB_SERVER_URL:-}}"
+          REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
+          SHA="${SHA:-${GITHUB_SHA:-}}"
+          REF_NAME="${REF_NAME:-${GITHUB_REF_NAME:-}}"
+
+          if [ -z "$REF_NAME" ] && [ -n "${GITHUB_REF:-}" ]; then
+            case "$GITHUB_REF" in
+              refs/heads/*) REF_NAME="${GITHUB_REF#refs/heads/}" ;;
+            esac
+          fi
+
+          if [ -z "$SERVER_URL" ] || [ -z "$REPO" ]; then
+            echo "Unable to resolve Gitea server URL or repository." >&2
+            exit 1
+          fi
+
+          if [ -z "$GITEA_TOKEN" ]; then
+            echo "GITEA_TOKEN secret is not set." >&2
+            exit 1
+          fi
+
+          echo "SERVER_URL: $SERVER_URL"
+          echo "REPO: $REPO"
+          echo "SHA: $SHA"
+          echo "REF_NAME: $REF_NAME"
+
+          HOST="${SERVER_URL#https://}"
+          HOST="${HOST#http://}"
+          AUTH_URL="https://oauth2:$GITEA_TOKEN@$HOST/$REPO.git"
+
+          CLONE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/granch-mis.XXXXXX")
+          CLONE_DIR="$CLONE_ROOT/repo"
+          git clone "$AUTH_URL" "$CLONE_DIR"
+          cd "$CLONE_DIR"
+          echo "REPO_DIR=$(pwd)" >> "$GITHUB_ENV"
+          git fetch --tags --force
+
+          if [ -n "$REF_NAME" ]; then
+            git fetch origin "$REF_NAME" --tags --force
+            if [ -n "$SHA" ]; then
+              git checkout -B "$REF_NAME" "$SHA"
+            else
+              git checkout -B "$REF_NAME" "origin/$REF_NAME"
+            fi
+          else
+            REF_NAME=$(git symbolic-ref refs/remotes/origin/HEAD --short | cut -d/ -f2-)
+            git checkout -B "$REF_NAME" "origin/$REF_NAME"
+          fi
+
+          echo "PUSH_BRANCH=$REF_NAME" >> "$GITHUB_ENV"
+          git log -1 --oneline
+
+      - name: Run Versionize
+        id: version
+        shell: sh
+        run: |
+          set -e
+          cd "$REPO_DIR"
+          PUSH_BRANCH="${PUSH_BRANCH:-${REF_NAME:-}}"
+          if [ -z "$PUSH_BRANCH" ]; then
+            PUSH_BRANCH=$(git branch --show-current 2>/dev/null || true)
+          fi
+          if [ -z "$PUSH_BRANCH" ]; then
+            echo "Unable to resolve branch for pushing Versionize release." >&2
+            exit 1
+          fi
+
+          git config user.email "ci@gitea.granch.local"
+          git config user.name "Gitea CI"
+
+          dotnet tool update --global Versionize || dotnet tool install --global Versionize
+          export PATH="$PATH:$HOME/.dotnet/tools"
+
+          VERSIONIZE_TZ_OFFSET=$(date +%z)
+          echo "Versionize timezone: $TZ ($VERSIONIZE_TZ_OFFSET)"
+          if [ "$VERSIONIZE_TZ_OFFSET" != "+0700" ]; then
+            echo "Versionize timezone must resolve to UTC+7 before creating the release commit." >&2
+            exit 1
+          fi
+          RELEASE_DATE="$(date -u '+%Y-%m-%dT%H:%M:%S')+0700"
+          export GIT_AUTHOR_DATE="$RELEASE_DATE"
+          export GIT_COMMITTER_DATE="$RELEASE_DATE"
+          echo "Git release date: $RELEASE_DATE"
+
+          versionize --proj-name "$VERSIONIZE_PROJECT_NAME" --skip-dirty
+
+          VERSION_TAG=$(git describe --tags --exact-match --match "${VERSIONIZE_PROJECT_NAME}-v*" HEAD)
+          VERSION="${VERSION_TAG#$VERSIONIZE_PROJECT_NAME-v}"
+          echo "Versionize commit date: $(git log -1 --format=%cI)"
+          echo "Normalizing release commit and tag date to $RELEASE_DATE"
+          git commit --amend --no-edit --date "$RELEASE_DATE"
+          git tag -d "$VERSION_TAG"
+          GIT_COMMITTER_DATE="$RELEASE_DATE" git tag -a "$VERSION_TAG" -m "$VERSION_TAG"
+          RELEASE_SHA=$(git rev-parse HEAD)
+          git log -1 --format='Final release commit date: %cI'
+          git for-each-ref "refs/tags/$VERSION_TAG" --format='Final release tag date: %(taggerdate:iso-strict)'
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+          echo "Release SHA: $RELEASE_SHA"
+
+          git push origin "HEAD:$PUSH_BRANCH" --follow-tags
+
+  build-image:
+    needs: versionize
+    runs-on: dind
+    env:
+      SERVER_URL: ${{ gitea.server_url }}
+      REPO: ${{ gitea.repository }}
+      REF_NAME: ${{ gitea.ref_name }}
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      DOCKER_TLS_CERTDIR: ""
+      DOCKER_REGISTRY: gitea.granch.local:3000
+      DOCKER_IMAGE_NAME: sw_develop/granch.scada.rtserver
+      REGISTRY_USERNAME: vlasov
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
+      VERSION: ${{ needs.versionize.outputs.version }}
+      RELEASE_SHA: ${{ needs.versionize.outputs.release_sha }}
+      TZ: Asia/Novosibirsk
+
+    steps:
+      - name: Disable SSL verify
+        shell: sh
+        run: |
+          set -e
+          git config --global http.sslVerify false
+          git config --global log.date iso-local
+          echo "Git timezone: $TZ ($(date +%z))"
+
+      - name: Checkout release commit
+        shell: sh
+        run: |
+          set -e
+          SERVER_URL="${SERVER_URL:-${GITHUB_SERVER_URL:-}}"
+          REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
+          REF_NAME="${REF_NAME:-${GITHUB_REF_NAME:-}}"
+
+          if [ -z "$REF_NAME" ] && [ -n "${GITHUB_REF:-}" ]; then
+            case "$GITHUB_REF" in
+              refs/heads/*) REF_NAME="${GITHUB_REF#refs/heads/}" ;;
+            esac
+          fi
+
+          if [ -z "$SERVER_URL" ] || [ -z "$REPO" ]; then
+            echo "Unable to resolve Gitea server URL or repository." >&2
+            exit 1
+          fi
+
+          if [ -z "$GITEA_TOKEN" ]; then
+            echo "GITEA_TOKEN secret is not set." >&2
+            exit 1
+          fi
+
+          if [ -z "$RELEASE_SHA" ]; then
+            echo "Versionize job did not provide RELEASE_SHA." >&2
+            exit 1
+          fi
+
+          echo "SERVER_URL: $SERVER_URL"
+          echo "REPO: $REPO"
+          echo "REF_NAME: $REF_NAME"
+          echo "VERSION: $VERSION"
+          echo "RELEASE_SHA: $RELEASE_SHA"
+
+          HOST="${SERVER_URL#https://}"
+          HOST="${HOST#http://}"
+          AUTH_URL="https://oauth2:$GITEA_TOKEN@$HOST/$REPO.git"
+
+          CLONE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/granch-mis.XXXXXX")
+          CLONE_DIR="$CLONE_ROOT/repo"
+          git clone "$AUTH_URL" "$CLONE_DIR"
+          cd "$CLONE_DIR"
+          echo "REPO_DIR=$(pwd)" >> "$GITHUB_ENV"
+          git fetch --tags --force
+
+          if [ -n "$REF_NAME" ]; then
+            git fetch origin "$REF_NAME" --tags --force
+          fi
+
+          git checkout "$RELEASE_SHA"
+          git log -1 --oneline
+
+      - name: Start build image
+        shell: sh
+        run: |
+          set -e
+          cd "$REPO_DIR"
+          pwd
+          ls -la
+
+          mkdir -p "/etc/docker/certs.d/$DOCKER_REGISTRY"
+          openssl s_client -showcerts -connect "$DOCKER_REGISTRY" </dev/null 2>/dev/null | \
+            openssl x509 -outform PEM > "/etc/docker/certs.d/$DOCKER_REGISTRY/ca.crt"
+          cp "/etc/docker/certs.d/$DOCKER_REGISTRY/ca.crt" /usr/local/share/ca-certificates/granch.crt
+          update-ca-certificates
+
+          echo "$REGISTRY_PASSWORD" | docker login "$DOCKER_REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
+
+          chmod +x ./build-docker-image.sh
+          sh ./build-docker-image.sh
