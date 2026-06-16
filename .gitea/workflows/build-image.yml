@@ -113,7 +113,7 @@ jobs:
             echo "Versionize timezone must resolve to UTC+7 before creating the release commit." >&2
             exit 1
           fi
-          RELEASE_DATE=$(date '+%Y-%m-%dT%H:%M:%S%z')
+          RELEASE_DATE="$(date -u '+%Y-%m-%dT%H:%M:%S')+0700"
           export GIT_AUTHOR_DATE="$RELEASE_DATE"
           export GIT_COMMITTER_DATE="$RELEASE_DATE"
           echo "Git release date: $RELEASE_DATE"
