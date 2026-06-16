@@ -37,10 +37,10 @@ jobs:
           HOST="${HOST#http://}"
           AUTH_URL="https://oauth2:$GITEA_TOKEN@$HOST/$REPO.git"
 
-          cd "../../"
-          rm -rf "$REPO"
-          git clone "$AUTH_URL" "$REPO"
-          cd "$REPO"
+          CLONE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/granch-mis.XXXXXX")
+          CLONE_DIR="$CLONE_ROOT/repo"
+          git clone "$AUTH_URL" "$CLONE_DIR"
+          cd "$CLONE_DIR"
           echo "REPO_DIR=$(pwd)" >> "$GITHUB_ENV"
           git fetch --tags --force
 
@@ -121,10 +121,10 @@ jobs:
           HOST="${HOST#http://}"
           AUTH_URL="https://oauth2:$GITEA_TOKEN@$HOST/$REPO.git"
 
-          cd "../../"
-          rm -rf "$REPO"
-          git clone "$AUTH_URL" "$REPO"
-          cd "$REPO"
+          CLONE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/granch-mis.XXXXXX")
+          CLONE_DIR="$CLONE_ROOT/repo"
+          git clone "$AUTH_URL" "$CLONE_DIR"
+          cd "$CLONE_DIR"
           echo "REPO_DIR=$(pwd)" >> "$GITHUB_ENV"
           git fetch --tags --force
 
