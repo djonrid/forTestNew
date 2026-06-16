@@ -1,0 +1,64 @@
+{
+  "CommitParser": {
+    "HeaderPatterns": [
+      "^\\[(?<type>\\w*)(?<breakingChangeMarker>!)?\\](?: \\((?<scope>.*)\\):?)?(?: (?<subject>.*))?$"
+    ]
+  },
+  "tagTemplate": "Backend-v{version}",
+  "changelog": {
+    "header": "Change Log",
+    "linkTemplates": {
+      "issueLink": "https://gitea.granch.local:3000/SW_Develop/Granch_MIS/issues/{issue}",
+      "commitLink": "https://gitea.granch.local:3000/SW_Develop/Granch_MIS/commit/{commitSha}"
+    },
+    "sections": [
+      {
+        "type": "feat",
+        "section": "✨ Features",
+        "hidden": false
+      },
+      {
+        "type": "fix",
+        "section": "🐛 Bug Fixes",
+        "hidden": false
+      },
+      {
+        "type": "perf",
+        "section": "🚀 Performance",
+        "hidden": false
+      },
+      {
+        "type": "refactor",
+        "section": "📦 Refactor",
+        "hidden": false
+      },
+      {
+        "type": "test",
+        "section": "🧪 Tests",
+        "hidden": false
+      },
+      {
+        "type": "docs",
+        "section": "📚 Docs",
+        "hidden": true
+      },
+      {
+        "type": "chore",
+        "section": "♻️ Chores",
+        "hidden": true
+      }
+    ]
+  },
+  "projects": [
+    {
+      "name": "Granch.Scada.WebApi",
+      "path": "Granch.Scada.WebApi/",
+      "tagTemplate": "{name}-v{version}"
+    },
+    {
+      "name": "Granch.RTServerCore",
+      "path": "Granch.RTServerCore/",
+      "tagTemplate": "{name}-v{version}"
+    }
+  ]
+}

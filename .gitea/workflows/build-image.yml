@@ -1,0 +1,104 @@
+name: Build RTServerCore image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-image:
+    runs-on: dind
+    env:
+      SERVER_URL: ${{ gitea.server_url }}
+      REPO: ${{ gitea.repository }}
+      SHA: ${{ gitea.sha }}
+      REF_NAME: ${{ gitea.ref_name }}
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      DOCKER_TLS_CERTDIR: ""
+      DOCKER_REGISTRY: gitea.granch.local:3000
+      DOCKER_IMAGE_NAME: sw_develop/granch.scada.rtserver
+      REGISTRY_USERNAME: vlasov
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
+
+    steps:
+      - name: Disable SSL verify
+        shell: sh
+        run: git config --global http.sslVerify false
+
+      - name: Checkout repository
+        shell: sh
+        run: |
+          set -e
+          echo "SERVER_URL: $SERVER_URL"
+          echo "REPO: $REPO"
+          echo "SHA: $SHA"
+
+          HOST="${SERVER_URL#https://}"
+          HOST="${HOST#http://}"
+          AUTH_URL="https://oauth2:$GITEA_TOKEN@$HOST/$REPO.git"
+
+          cd "../../"
+          rm -rf "$REPO"
+          git clone "$AUTH_URL" "$REPO"
+          cd "$REPO"
+          echo "REPO_DIR=$(pwd)" >> "$GITHUB_ENV"
+          git fetch --tags --force
+
+          if [ -n "$REF_NAME" ]; then
+            git checkout -B "$REF_NAME" "$SHA"
+          else
+            git checkout "$SHA"
+          fi
+
+          git log -1 --oneline
+
+      - name: Run Versionize
+        shell: sh
+        run: |
+          set -e
+          HOST="${SERVER_URL#https://}"
+          HOST="${HOST#http://}"
+          AUTH_URL="https://oauth2:$GITEA_TOKEN@$HOST/$REPO.git"
+
+          cd "$REPO_DIR"
+          git config user.email "ci@gitea.granch.local"
+          git config user.name "Gitea CI"
+
+          dotnet tool update --global Versionize || dotnet tool install --global Versionize
+          export PATH="$PATH:$HOME/.dotnet/tools"
+
+          versionize --proj-name "$VERSIONIZE_PROJECT_NAME" --skip-dirty
+
+          VERSION_TAG=$(git describe --tags --match "${VERSIONIZE_PROJECT_NAME}-v*" --abbrev=0)
+          VERSION="${VERSION_TAG#$VERSIONIZE_PROJECT_NAME-v}"
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Resolved version: $VERSION"
+
+          if [ -n "$REF_NAME" ]; then
+            git push "$AUTH_URL" "HEAD:$REF_NAME" --follow-tags
+          else
+            git push "$AUTH_URL" --follow-tags
+          fi
+
+      - name: Start build image
+        shell: sh
+        run: |
+          set -e
+          cd "$REPO_DIR"
+          pwd
+          ls -la
+
+          mkdir -p "/etc/docker/certs.d/$DOCKER_REGISTRY"
+          openssl s_client -showcerts -connect "$DOCKER_REGISTRY" </dev/null 2>/dev/null | \
+            openssl x509 -outform PEM > "/etc/docker/certs.d/$DOCKER_REGISTRY/ca.crt"
+          cp "/etc/docker/certs.d/$DOCKER_REGISTRY/ca.crt" /usr/local/share/ca-certificates/granch.crt
+          update-ca-certificates
+
+          echo "$REGISTRY_PASSWORD" | docker login "$DOCKER_REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
+
+          chmod +x ./build-docker-image.sh
+          sh ./build-docker-image.sh
