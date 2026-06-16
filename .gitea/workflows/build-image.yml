@@ -113,12 +113,30 @@ jobs:
             echo "Versionize timezone must resolve to UTC+7 before creating the release commit." >&2
             exit 1
           fi
+          RELEASE_DATE=$(date '+%Y-%m-%dT%H:%M:%S%z')
+          export GIT_AUTHOR_DATE="$RELEASE_DATE"
+          export GIT_COMMITTER_DATE="$RELEASE_DATE"
+          echo "Git release date: $RELEASE_DATE"
 
           versionize --proj-name "$VERSIONIZE_PROJECT_NAME" --skip-dirty
 
-          VERSION_TAG=$(git describe --tags --match "${VERSIONIZE_PROJECT_NAME}-v*" --abbrev=0)
+          VERSION_TAG=$(git describe --tags --exact-match --match "${VERSIONIZE_PROJECT_NAME}-v*" HEAD)
           VERSION="${VERSION_TAG#$VERSIONIZE_PROJECT_NAME-v}"
+          RELEASE_COMMIT_DATE=$(git log -1 --format=%cI)
+          case "$RELEASE_COMMIT_DATE" in
+            *+07:00)
+              echo "Release commit date: $RELEASE_COMMIT_DATE"
+              ;;
+            *)
+              echo "Release commit date '$RELEASE_COMMIT_DATE' is not UTC+7; rewriting release commit and tag." >&2
+              git commit --amend --no-edit --date "$RELEASE_DATE"
+              git tag -d "$VERSION_TAG"
+              GIT_COMMITTER_DATE="$RELEASE_DATE" git tag -a "$VERSION_TAG" -m "$VERSION_TAG"
+              ;;
+          esac
           RELEASE_SHA=$(git rev-parse HEAD)
+          git log -1 --format='Final release commit date: %cI'
+          git for-each-ref "refs/tags/$VERSION_TAG" --format='Final release tag date: %(taggerdate:iso-strict)'
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
