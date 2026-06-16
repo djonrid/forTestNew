@@ -19,7 +19,7 @@ jobs:
       REF_NAME: ${{ gitea.ref_name }}
       GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
       VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
-      TZ: Asia/Krasnoyarsk
+      TZ: Asia/Novosibirsk
 
     steps:
       - name: Disable SSL verify
@@ -122,18 +122,11 @@ jobs:
 
           VERSION_TAG=$(git describe --tags --exact-match --match "${VERSIONIZE_PROJECT_NAME}-v*" HEAD)
           VERSION="${VERSION_TAG#$VERSIONIZE_PROJECT_NAME-v}"
-          RELEASE_COMMIT_DATE=$(git log -1 --format=%cI)
-          case "$RELEASE_COMMIT_DATE" in
-            *+07:00)
-              echo "Release commit date: $RELEASE_COMMIT_DATE"
-              ;;
-            *)
-              echo "Release commit date '$RELEASE_COMMIT_DATE' is not UTC+7; rewriting release commit and tag." >&2
-              git commit --amend --no-edit --date "$RELEASE_DATE"
-              git tag -d "$VERSION_TAG"
-              GIT_COMMITTER_DATE="$RELEASE_DATE" git tag -a "$VERSION_TAG" -m "$VERSION_TAG"
-              ;;
-          esac
+          echo "Versionize commit date: $(git log -1 --format=%cI)"
+          echo "Normalizing release commit and tag date to $RELEASE_DATE"
+          git commit --amend --no-edit --date "$RELEASE_DATE"
+          git tag -d "$VERSION_TAG"
+          GIT_COMMITTER_DATE="$RELEASE_DATE" git tag -a "$VERSION_TAG" -m "$VERSION_TAG"
           RELEASE_SHA=$(git rev-parse HEAD)
           git log -1 --format='Final release commit date: %cI'
           git for-each-ref "refs/tags/$VERSION_TAG" --format='Final release tag date: %(taggerdate:iso-strict)'
@@ -162,7 +155,7 @@ jobs:
       VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
       VERSION: ${{ needs.versionize.outputs.version }}
       RELEASE_SHA: ${{ needs.versionize.outputs.release_sha }}
-      TZ: Asia/Krasnoyarsk
+      TZ: Asia/Novosibirsk
 
     steps:
       - name: Disable SSL verify
