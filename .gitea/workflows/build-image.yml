@@ -29,9 +29,31 @@ jobs:
         shell: sh
         run: |
           set -e
+          SERVER_URL="${SERVER_URL:-${GITHUB_SERVER_URL:-}}"
+          REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
+          SHA="${SHA:-${GITHUB_SHA:-}}"
+          REF_NAME="${REF_NAME:-${GITHUB_REF_NAME:-}}"
+
+          if [ -z "$REF_NAME" ] && [ -n "${GITHUB_REF:-}" ]; then
+            case "$GITHUB_REF" in
+              refs/heads/*) REF_NAME="${GITHUB_REF#refs/heads/}" ;;
+            esac
+          fi
+
+          if [ -z "$SERVER_URL" ] || [ -z "$REPO" ]; then
+            echo "Unable to resolve Gitea server URL or repository." >&2
+            exit 1
+          fi
+
+          if [ -z "$GITEA_TOKEN" ]; then
+            echo "GITEA_TOKEN secret is not set." >&2
+            exit 1
+          fi
+
           echo "SERVER_URL: $SERVER_URL"
           echo "REPO: $REPO"
           echo "SHA: $SHA"
+          echo "REF_NAME: $REF_NAME"
 
           HOST="${SERVER_URL#https://}"
           HOST="${HOST#http://}"
@@ -45,11 +67,18 @@ jobs:
           git fetch --tags --force
 
           if [ -n "$REF_NAME" ]; then
-            git checkout -B "$REF_NAME" "$SHA"
+            git fetch origin "$REF_NAME" --tags --force
+            if [ -n "$SHA" ]; then
+              git checkout -B "$REF_NAME" "$SHA"
+            else
+              git checkout -B "$REF_NAME" "origin/$REF_NAME"
+            fi
           else
-            git checkout "$SHA"
+            REF_NAME=$(git symbolic-ref refs/remotes/origin/HEAD --short | cut -d/ -f2-)
+            git checkout -B "$REF_NAME" "origin/$REF_NAME"
           fi
 
+          echo "PUSH_BRANCH=$REF_NAME" >> "$GITHUB_ENV"
           git log -1 --oneline
 
       - name: Run Versionize
@@ -57,11 +86,16 @@ jobs:
         shell: sh
         run: |
           set -e
-          HOST="${SERVER_URL#https://}"
-          HOST="${HOST#http://}"
-          AUTH_URL="https://oauth2:$GITEA_TOKEN@$HOST/$REPO.git"
-
           cd "$REPO_DIR"
+          PUSH_BRANCH="${PUSH_BRANCH:-${REF_NAME:-}}"
+          if [ -z "$PUSH_BRANCH" ]; then
+            PUSH_BRANCH=$(git branch --show-current 2>/dev/null || true)
+          fi
+          if [ -z "$PUSH_BRANCH" ]; then
+            echo "Unable to resolve branch for pushing Versionize release." >&2
+            exit 1
+          fi
+
           git config user.email "ci@gitea.granch.local"
           git config user.name "Gitea CI"
 
@@ -79,11 +113,7 @@ jobs:
           echo "Resolved version: $VERSION"
           echo "Release SHA: $RELEASE_SHA"
 
-          if [ -n "$REF_NAME" ]; then
-            git push "$AUTH_URL" "HEAD:$REF_NAME" --follow-tags
-          else
-            git push "$AUTH_URL" --follow-tags
-          fi
+          git push origin "HEAD:$PUSH_BRANCH" --follow-tags
 
   build-image:
     needs: versionize
@@ -112,8 +142,34 @@ jobs:
         shell: sh
         run: |
           set -e
+          SERVER_URL="${SERVER_URL:-${GITHUB_SERVER_URL:-}}"
+          REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
+          REF_NAME="${REF_NAME:-${GITHUB_REF_NAME:-}}"
+
+          if [ -z "$REF_NAME" ] && [ -n "${GITHUB_REF:-}" ]; then
+            case "$GITHUB_REF" in
+              refs/heads/*) REF_NAME="${GITHUB_REF#refs/heads/}" ;;
+            esac
+          fi
+
+          if [ -z "$SERVER_URL" ] || [ -z "$REPO" ]; then
+            echo "Unable to resolve Gitea server URL or repository." >&2
+            exit 1
+          fi
+
+          if [ -z "$GITEA_TOKEN" ]; then
+            echo "GITEA_TOKEN secret is not set." >&2
+            exit 1
+          fi
+
+          if [ -z "$RELEASE_SHA" ]; then
+            echo "Versionize job did not provide RELEASE_SHA." >&2
+            exit 1
+          fi
+
           echo "SERVER_URL: $SERVER_URL"
           echo "REPO: $REPO"
+          echo "REF_NAME: $REF_NAME"
           echo "VERSION: $VERSION"
           echo "RELEASE_SHA: $RELEASE_SHA"
 

@@ -28,6 +28,11 @@ The `Granch.RTServerCore` project uses tags in the format:
 Granch.RTServerCore-v1.2.3
 ```
 
+On the first Versionize release, `1.0.0` is expected. Later releases are bumped
+from matching commit messages since the latest `Granch.RTServerCore-v*` tag:
+`[fix]` creates a patch release, `[feat]` creates a minor release, and `[type!]`
+creates a major release.
+
 `build-docker-image.sh` reads the version from the `VERSION` environment
 variable set by the workflow. If it is not set, the script falls back to the
 latest `Granch.RTServerCore-v*` git tag.
