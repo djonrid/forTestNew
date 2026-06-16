@@ -7,20 +7,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-image:
-    runs-on: dind
+  versionize:
+    runs-on: dotnet10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_sha: ${{ steps.version.outputs.release_sha }}
     env:
       SERVER_URL: ${{ gitea.server_url }}
       REPO: ${{ gitea.repository }}
       SHA: ${{ gitea.sha }}
       REF_NAME: ${{ gitea.ref_name }}
       GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-      DOCKER_HOST: unix:///var/run/docker.sock
-      DOCKER_TLS_CERTDIR: ""
-      DOCKER_REGISTRY: gitea.granch.local:3000
-      DOCKER_IMAGE_NAME: sw_develop/granch.scada.rtserver
-      REGISTRY_USERNAME: vlasov
-      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
       VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
 
     steps:
@@ -56,6 +53,7 @@ jobs:
           git log -1 --oneline
 
       - name: Run Versionize
+        id: version
         shell: sh
         run: |
           set -e
@@ -74,15 +72,68 @@ jobs:
 
           VERSION_TAG=$(git describe --tags --match "${VERSIONIZE_PROJECT_NAME}-v*" --abbrev=0)
           VERSION="${VERSION_TAG#$VERSIONIZE_PROJECT_NAME-v}"
+          RELEASE_SHA=$(git rev-parse HEAD)
 
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION"
+          echo "Release SHA: $RELEASE_SHA"
 
           if [ -n "$REF_NAME" ]; then
             git push "$AUTH_URL" "HEAD:$REF_NAME" --follow-tags
           else
             git push "$AUTH_URL" --follow-tags
           fi
+
+  build-image:
+    needs: versionize
+    runs-on: dind
+    env:
+      SERVER_URL: ${{ gitea.server_url }}
+      REPO: ${{ gitea.repository }}
+      REF_NAME: ${{ gitea.ref_name }}
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      DOCKER_TLS_CERTDIR: ""
+      DOCKER_REGISTRY: gitea.granch.local:3000
+      DOCKER_IMAGE_NAME: sw_develop/granch.scada.rtserver
+      REGISTRY_USERNAME: vlasov
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
+      VERSION: ${{ needs.versionize.outputs.version }}
+      RELEASE_SHA: ${{ needs.versionize.outputs.release_sha }}
+
+    steps:
+      - name: Disable SSL verify
+        shell: sh
+        run: git config --global http.sslVerify false
+
+      - name: Checkout release commit
+        shell: sh
+        run: |
+          set -e
+          echo "SERVER_URL: $SERVER_URL"
+          echo "REPO: $REPO"
+          echo "VERSION: $VERSION"
+          echo "RELEASE_SHA: $RELEASE_SHA"
+
+          HOST="${SERVER_URL#https://}"
+          HOST="${HOST#http://}"
+          AUTH_URL="https://oauth2:$GITEA_TOKEN@$HOST/$REPO.git"
+
+          cd "../../"
+          rm -rf "$REPO"
+          git clone "$AUTH_URL" "$REPO"
+          cd "$REPO"
+          echo "REPO_DIR=$(pwd)" >> "$GITHUB_ENV"
+          git fetch --tags --force
+
+          if [ -n "$REF_NAME" ]; then
+            git fetch origin "$REF_NAME" --tags --force
+          fi
+
+          git checkout "$RELEASE_SHA"
+          git log -1 --oneline
 
       - name: Start build image
         shell: sh
