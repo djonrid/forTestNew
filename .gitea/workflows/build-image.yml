@@ -24,7 +24,11 @@ jobs:
     steps:
       - name: Disable SSL verify
         shell: sh
-        run: git config --global http.sslVerify false
+        run: |
+          set -e
+          git config --global http.sslVerify false
+          git config --global log.date iso-local
+          echo "Git timezone: $TZ ($(date +%z))"
 
       - name: Checkout repository
         shell: sh
@@ -140,11 +144,16 @@ jobs:
       VERSIONIZE_PROJECT_NAME: Granch.RTServerCore
       VERSION: ${{ needs.versionize.outputs.version }}
       RELEASE_SHA: ${{ needs.versionize.outputs.release_sha }}
+      TZ: Asia/Krasnoyarsk
 
     steps:
       - name: Disable SSL verify
         shell: sh
-        run: git config --global http.sslVerify false
+        run: |
+          set -e
+          git config --global http.sslVerify false
+          git config --global log.date iso-local
+          echo "Git timezone: $TZ ($(date +%z))"
 
       - name: Checkout release commit
         shell: sh
