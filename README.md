@@ -27,5 +27,4 @@ Granch.RTServerCore-v1.2.3
 
 `build-docker-image.sh` reads the version from the `VERSION` environment
 variable set by the workflow. If it is not set, the script falls back to the
-latest `Granch.RTServerCore-v*` git tag, and then to the old `version.json`
-format for compatibility.
+latest `Granch.RTServerCore-v*` git tag.

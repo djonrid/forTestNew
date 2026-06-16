@@ -19,11 +19,6 @@ resolve_version() {
     return
   fi
 
-  if [ -f ./version.json ]; then
-    grep AssemblyInformationalVersion ./version.json | cut -d'"' -f4
-    return
-  fi
-
   echo "Unable to resolve version. Run versionize or set VERSION." >&2
   exit 1
 }
